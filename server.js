@@ -4,110 +4,92 @@ const http = require('http');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
 
-const rooms = {}; // ¥Ê¥¢∑øº‰ ˝æ›
+// ÂÖ≥ÈîÆÈÖçÁΩÆÔºöÂÖÅËÆ∏ÊâÄÊúâÂâçÁ´ØËøûÊé•Ôºà‰∏äÁ∫øÂêéÂª∫ËÆÆÈôêÂà∂‰∏∫‰Ω†ÁöÑNetlifyÂüüÂêçÔºâ
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+const rooms = {};
 
 io.on('connection', (socket) => {
-    console.log('–¬”√ªß¡¨Ω”');
+  console.log('Êñ∞Áî®Êà∑ËøûÊé•:', socket.id);
 
-    socket.on('join-room', (roomCode) => {
-        if (!rooms[roomCode]) {
-            rooms[roomCode] = {
-                players: [],
-                board: Array(15).fill().map(() => Array(15).fill(null)),
-                currentTurn: 'red'
-            };
-        }
-
-        const room = rooms[roomCode];
-        if (room.players.length >= 3) {
-            socket.emit('room-full');
-            return;
-        }
-
-        const colors = ['red', 'yellow', 'green'];
-        const playerColor = colors[room.players.length];
-
-        socket.join(roomCode);
-        room.players.push(playerColor);
-
-        socket.emit('assign-color', playerColor);
-
-        if (room.players.length === 3) {
-            io.to(roomCode).emit('game-start', room.players);
-        }
-    });
-
-    socket.on('make-move', (data) => {
-        const { row, col, color, room } = data;
-        const gameRoom = rooms[room];
-
-        if (gameRoom && color === gameRoom.currentTurn && !gameRoom.board[row][col]) {
-            gameRoom.board[row][col] = color;
-            gameRoom.currentTurn = getNextColor(color);
-
-            io.to(room).emit('move-made', { row, col, color });
-
-            if (checkWin(gameRoom.board, row, col, color)) {
-                io.to(room).emit('game-over', color);
-            }
-        }
-    });
-
-    socket.on('disconnect', () => {
-        console.log('”√ªß∂œø™¡¨Ω”');
-    });
-});
-
-function getNextColor(current) {
-    const colors = ['red', 'yellow', 'green'];
-    const currentIndex = colors.indexOf(current);
-    return colors[(currentIndex + 1) % colors.length];
-}
-
-function checkWin(board, row, col, color) {
-    const directions = [
-        [0, 1],   // ÀÆ∆Ω
-        [1, 0],    // ¥π÷±
-        [1, 1],    // ∂‘Ω«œﬂ
-        [1, -1]    // ∑¥∂‘Ω«œﬂ
-    ];
-
-    for (const [dx, dy] of directions) {
-        let count = 1;
-
-        // ’˝œÚºÏ≤È
-        for (let i = 1; i < 4; i++) {
-            const newRow = row + i * dx;
-            const newCol = col + i * dy;
-            if (newRow >= 0 && newRow < 15 && newCol >= 0 && newCol < 15 &&
-                board[newRow][newCol] === color) {
-                count++;
-            } else {
-                break;
-            }
-        }
-
-        // ∑¥œÚºÏ≤È
-        for (let i = 1; i < 4; i++) {
-            const newRow = row - i * dx;
-            const newCol = col - i * dy;
-            if (newRow >= 0 && newRow < 15 && newCol >= 0 && newCol < 15 &&
-                board[newRow][newCol] === color) {
-                count++;
-            } else {
-                break;
-            }
-        }
-
-        if (count >= 4) return true;
+  socket.on('join-room', (roomCode) => {
+    if (!/^\d{4}$/.test(roomCode)) {
+      socket.emit('invalid-room');
+      return;
     }
 
-    return false;
+    if (!rooms[roomCode]) {
+      rooms[roomCode] = {
+        players: [],
+        board: Array(15).fill().map(() => Array(15).fill(null)),
+        currentTurn: 'red'
+      };
+    }
+
+    const room = rooms[roomCode];
+    if (room.players.length >= 3) {
+      socket.emit('room-full');
+      return;
+    }
+
+    const colors = ['red', 'yellow', 'green'];
+    const playerColor = colors[room.players.length];
+    
+    socket.join(roomCode);
+    room.players.push(playerColor);
+    socket.emit('assign-color', playerColor);
+
+    if (room.players.length === 3) {
+      io.to(roomCode).emit('game-start', room.players);
+    }
+  });
+
+  socket.on('make-move', (data) => {
+    const { row, col, color, room } = data;
+    const gameRoom = rooms[room];
+
+    if (!gameRoom || color !== gameRoom.currentTurn || 
+        row < 0 || row >= 15 || col < 0 || col >= 15 ||
+        gameRoom.board[row][col]) {
+      return;
+    }
+
+    gameRoom.board[row][col] = color;
+    gameRoom.currentTurn = getNextColor(color);
+    io.to(room).emit('move-made', { row, col, color });
+
+    if (checkWin(gameRoom.board, row, col, color)) {
+      io.to(room).emit('game-over', color);
+      // ÈáçÁΩÆÊàøÈó¥
+      gameRoom.board = Array(15).fill().map(() => Array(15).fill(null));
+      gameRoom.currentTurn = 'red';
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Áî®Êà∑Êñ≠ÂºÄËøûÊé•:', socket.id);
+  });
+});
+
+// ËÆ°ÁÆó‰∏ã‰∏Ä‰∏™Áé©ÂÆ∂È¢úËâ≤
+function getNextColor(current) {
+  const colors = ['red', 'yellow', 'green'];
+  const currentIndex = colors.indexOf(current);
+  return colors[(currentIndex + 1) % colors.length];
 }
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`∑˛ŒÒ∆˜‘À––‘⁄∂Àø⁄ ${PORT}`);
-});
+// Ê£ÄÊü•ËÉúÂà©Êù°‰ª∂
+function checkWin(board, row, col, color) {
+  const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+  return directions.some(([dx, dy]) => {
+    let count = 1;
+    // Ê≠£ÂêëÊ£ÄÊü•
+    for (let i = 1; i < 4; i++) {
+      const r = row + i * dx, c = col + i * dy;
+      if (r >= 0 && r < 15 && c >= 
